@@ -102,8 +102,16 @@ export const metrics = {
 
   /**
    * Update last processed block
+   * Note: prom-client doesn't support bigint, so we convert to number.
+   * This is safe for current Ethereum block numbers but may lose precision
+   * for very large values (> Number.MAX_SAFE_INTEGER).
    */
   setLastBlock(chainId: number, blockNumber: bigint): void {
+    if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) {
+      console.warn(
+        `[Metrics] Block number ${blockNumber} exceeds MAX_SAFE_INTEGER. Metric will lose precision.`
+      );
+    }
     lastBlock.set({ chainId: String(chainId) }, Number(blockNumber));
   },
 

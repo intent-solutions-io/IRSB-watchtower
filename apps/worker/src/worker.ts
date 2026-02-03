@@ -1,3 +1,4 @@
+import { createServer, type Server } from 'node:http';
 import {
   RuleEngine,
   RuleRegistry,
@@ -14,7 +15,7 @@ import { parseAllowlist } from '@irsb-watchtower/config';
 import { IrsbClient } from '@irsb-watchtower/irsb-adapter';
 import { createLogger } from './lib/logger.js';
 import { getConfig } from './lib/config.js';
-import { metrics } from './lib/metrics.js';
+import { metrics, registry as metricsRegistry } from './lib/metrics.js';
 
 /**
  * Create a chain context for rule evaluation using the IRSB client
@@ -333,6 +334,31 @@ async function main() {
     'Rules registered'
   );
 
+  // Start metrics HTTP server on port 9090
+  const metricsPort = 9090;
+  const metricsServer: Server = createServer(async (req, res) => {
+    if (req.url === '/metrics' && req.method === 'GET') {
+      try {
+        const metricsOutput = await metricsRegistry.metrics();
+        res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
+        res.end(metricsOutput);
+      } catch (error) {
+        res.writeHead(500);
+        res.end('Error generating metrics');
+      }
+    } else if (req.url === '/health' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+    } else {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  });
+
+  metricsServer.listen(metricsPort, () => {
+    logger.info({ port: metricsPort }, 'Worker metrics server started');
+  });
+
   // Run initial scan
   await runScanCycle(engine, client, cursor, executor, logger, config);
 
@@ -349,6 +375,7 @@ async function main() {
   const shutdown = () => {
     logger.info('Shutting down worker');
     clearInterval(intervalId);
+    metricsServer.close();
     process.exit(0);
   };
 
