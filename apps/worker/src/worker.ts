@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { parseAllowlist } from '@irsb-watchtower/config';
+import { parseAllowlist, getEffectiveChains, type ChainEntry } from '@irsb-watchtower/config';
 import {
   RuleEngine,
   RuleRegistry,
@@ -101,6 +101,20 @@ async function postFindingsToApi(
 }
 
 /**
+ * Context object for scan cycle - encapsulates all per-chain components
+ */
+interface ScanContext {
+  engine: RuleEngine;
+  client: IrsbClient;
+  cursor: BlockCursor;
+  executor: ActionExecutor;
+  logger: ReturnType<typeof createLogger>;
+  config: ReturnType<typeof getConfig>;
+  webhookSink?: WebhookSink;
+  evidenceStore?: EvidenceStore;
+}
+
+/**
  * Convert a Finding to a FindingRecord for storage
  */
 function findingToRecord(finding: Finding, chainId: number): FindingRecord {
@@ -128,16 +142,8 @@ function findingToRecord(finding: Finding, chainId: number): FindingRecord {
 /**
  * Run a single scan cycle
  */
-async function runScanCycle(
-  engine: RuleEngine,
-  client: IrsbClient,
-  cursor: BlockCursor,
-  executor: ActionExecutor,
-  logger: ReturnType<typeof createLogger>,
-  config: ReturnType<typeof getConfig>,
-  webhookSink?: WebhookSink,
-  evidenceStore?: EvidenceStore
-): Promise<Finding[]> {
+async function runScanCycle(ctx: ScanContext): Promise<Finding[]> {
+  const { engine, client, cursor, executor, logger, config, webhookSink, evidenceStore } = ctx;
   const chainId = config.chain.chainId;
   const scanStartTime = Date.now();
 
@@ -341,44 +347,40 @@ async function runScanCycle(
 }
 
 /**
- * Main worker loop
+ * Create and start a chain watcher
+ * Returns cleanup function and interval ID
  */
-async function main() {
-  const config = getConfig();
-  const logger = createLogger(config.logging.level, config.logging.format);
+function createChainWatcher(
+  chainEntry: ChainEntry,
+  config: ReturnType<typeof getConfig>,
+  logger: ReturnType<typeof createLogger>,
+  webhookSink: WebhookSink | undefined,
+  evidenceStore: EvidenceStore | undefined,
+  startTime: number
+): { intervalId: NodeJS.Timeout; heartbeatIntervalId?: NodeJS.Timeout; runScan: () => Promise<Finding[]> } {
+  const chainLogger = logger.child({ chain: chainEntry.name, chainId: chainEntry.chainId });
 
-  logger.info(
-    {
-      scanIntervalMs: config.worker.scanIntervalMs,
-      chainId: config.chain.chainId,
-      postToApi: config.worker.postToApi,
-      dryRun: config.rules.dryRun,
-      maxActionsPerScan: config.rules.maxActionsPerScan,
-    },
-    'IRSB Watchtower Worker starting'
-  );
+  // Initialize state management for this chain (chain-specific ledger file)
+  const ledger = new ActionLedger(config.rules.stateDir, chainEntry.chainId);
+  const cursor = new BlockCursor(config.rules.stateDir, chainEntry.chainId);
 
-  // Initialize state management
-  const ledger = new ActionLedger(config.rules.stateDir);
-  const cursor = new BlockCursor(config.rules.stateDir, config.chain.chainId);
-
-  logger.info(
+  chainLogger.info(
     {
       stateDir: config.rules.stateDir,
       ledgerSize: ledger.size,
       lastProcessedBlock: cursor.getLastProcessedBlock()?.toString() ?? 'none',
     },
-    'State management initialized'
+    'State management initialized for chain'
   );
 
-  // Create IRSB client
+  // Create IRSB client for this chain
   const client = new IrsbClient({
-    rpcUrl: config.chain.rpcUrl,
-    chainId: config.chain.chainId,
-    contracts: config.contracts,
+    rpcUrl: chainEntry.rpcUrl,
+    chainId: chainEntry.chainId,
+    contracts: chainEntry.contracts,
   });
 
-  // Create action executor
+  // Create action executor for this chain
   const executor = new ActionExecutor({
     dryRun: config.rules.dryRun,
     maxActionsPerBatch: config.rules.maxActionsPerScan,
@@ -387,22 +389,18 @@ async function main() {
 
   // Set up logger for executor
   executor.setLogger((message: string, level: 'info' | 'warn' | 'error') => {
-    logger[level]({ component: 'ActionExecutor' }, message);
+    chainLogger[level]({ component: 'ActionExecutor' }, message);
   });
 
   // Register action handlers
-  // In production, these would call the IRSB client to execute transactions
   executor.registerHandler('OPEN_DISPUTE' as ActionType, async (finding: Finding) => {
-    // TODO: Implement actual dispute opening via client
-    logger.info({ receiptId: finding.receiptId }, 'Opening dispute');
-    // const txHash = await client.openDispute({ ... });
+    chainLogger.info({ receiptId: finding.receiptId }, 'Opening dispute');
     return { txHash: '0xmock_tx_hash' };
   });
 
   // Create rule registry with receipt stale rule
   const registry = new RuleRegistry();
 
-  // Add the receipt stale rule with config
   const receiptStaleRule = createReceiptStaleRule({
     challengeWindowSeconds: config.rules.challengeWindowSeconds,
     minReceiptAgeSeconds: config.rules.minReceiptAgeSeconds,
@@ -415,14 +413,84 @@ async function main() {
   // Create rule engine
   const engine = new RuleEngine(registry);
 
-  // Log registered rules
-  const rules = engine.getRegistry().getAll();
+  // Create chain-specific config with this chain's details
+  const chainConfig = {
+    ...config,
+    chain: {
+      rpcUrl: chainEntry.rpcUrl,
+      chainId: chainEntry.chainId,
+    },
+    contracts: chainEntry.contracts,
+  };
+
+  // Create scan context for this chain
+  const scanContext: ScanContext = {
+    engine,
+    client,
+    cursor,
+    executor,
+    logger: chainLogger,
+    config: chainConfig,
+    webhookSink,
+    evidenceStore,
+  };
+
+  // Scan function for this chain
+  const runScan = async () => {
+    return runScanCycle(scanContext);
+  };
+
+  // Start interval loop for this chain
+  const intervalId = setInterval(async () => {
+    try {
+      await runScan();
+    } catch (error) {
+      chainLogger.error({ error }, 'Scan cycle failed');
+    }
+  }, config.worker.scanIntervalMs);
+
+  // Set up heartbeat for this chain if enabled
+  let heartbeatIntervalId: NodeJS.Timeout | undefined;
+  if (webhookSink && config.webhook.sendHeartbeat) {
+    heartbeatIntervalId = setInterval(async () => {
+      const lastBlock = cursor.getLastProcessedBlock();
+      const result = await webhookSink.sendHeartbeat({
+        chainId: chainEntry.chainId,
+        lastBlock: lastBlock?.toString() ?? '0',
+        uptime: Math.floor((Date.now() - startTime) / 1000),
+      });
+      if (!result.success) {
+        chainLogger.warn({ error: result.error }, 'Failed to send heartbeat');
+      }
+    }, config.webhook.heartbeatIntervalMs);
+  }
+
+  return { intervalId, heartbeatIntervalId, runScan };
+}
+
+/**
+ * Main worker loop
+ */
+async function main() {
+  const config = getConfig();
+  const logger = createLogger(config.logging.level, config.logging.format);
+
+  // Get effective chains (multi-chain or single-chain mode)
+  const chains = getEffectiveChains(config);
+
   logger.info(
-    { ruleCount: rules.length, rules: rules.map((r) => r.metadata.id) },
-    'Rules registered'
+    {
+      scanIntervalMs: config.worker.scanIntervalMs,
+      chainCount: chains.length,
+      chains: chains.map(c => ({ name: c.name, chainId: c.chainId })),
+      postToApi: config.worker.postToApi,
+      dryRun: config.rules.dryRun,
+      maxActionsPerScan: config.rules.maxActionsPerScan,
+    },
+    'IRSB Watchtower Worker starting'
   );
 
-  // Create evidence store if enabled
+  // Create evidence store if enabled (shared across all chains)
   let evidenceStore: EvidenceStore | undefined;
   if (config.evidence.enabled) {
     evidenceStore = createEvidenceStore({
@@ -433,9 +501,8 @@ async function main() {
     logger.info({ dataDir: config.evidence.dataDir }, 'Evidence store initialized');
   }
 
-  // Create webhook sink if enabled
+  // Create webhook sink if enabled (shared across all chains)
   let webhookSink: WebhookSink | undefined;
-  let heartbeatIntervalId: NodeJS.Timeout | undefined;
   const startTime = Date.now();
 
   if (config.webhook.enabled && config.webhook.url && config.webhook.secret) {
@@ -447,22 +514,6 @@ async function main() {
       retryDelayMs: config.webhook.retryDelayMs,
     });
     logger.info({ url: config.webhook.url }, 'Webhook sink configured');
-
-    // Start heartbeat if enabled
-    if (config.webhook.sendHeartbeat) {
-      heartbeatIntervalId = setInterval(async () => {
-        const lastBlock = cursor.getLastProcessedBlock();
-        const result = await webhookSink!.sendHeartbeat({
-          chainId: config.chain.chainId,
-          lastBlock: lastBlock?.toString() ?? '0',
-          uptime: Math.floor((Date.now() - startTime) / 1000),
-        });
-        if (!result.success) {
-          logger.warn({ error: result.error }, 'Failed to send heartbeat');
-        }
-      }, config.webhook.heartbeatIntervalMs);
-      logger.info({ intervalMs: config.webhook.heartbeatIntervalMs }, 'Webhook heartbeat enabled');
-    }
   }
 
   // Start metrics HTTP server on port 9090
@@ -479,7 +530,7 @@ async function main() {
       }
     } else if (req.url === '/health' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok' }));
+      res.end(JSON.stringify({ status: 'ok', chains: chains.length }));
     } else {
       res.writeHead(404);
       res.end('Not found');
@@ -490,25 +541,44 @@ async function main() {
     logger.info({ port: metricsPort }, 'Worker metrics server started');
   });
 
-  // Run initial scan
-  await runScanCycle(engine, client, cursor, executor, logger, config, webhookSink, evidenceStore);
+  // Create watchers for each chain
+  const watchers: Array<ReturnType<typeof createChainWatcher>> = [];
 
-  // Start interval loop
-  const intervalId = setInterval(async () => {
-    try {
-      await runScanCycle(engine, client, cursor, executor, logger, config, webhookSink, evidenceStore);
-    } catch (error) {
-      logger.error({ error }, 'Scan cycle failed');
-    }
-  }, config.worker.scanIntervalMs);
+  for (const chainEntry of chains) {
+    logger.info(
+      { chain: chainEntry.name, chainId: chainEntry.chainId, rpcUrl: chainEntry.rpcUrl.replace(/\/\/.*@/, '//***@') },
+      'Starting chain watcher'
+    );
+
+    const watcher = createChainWatcher(
+      chainEntry,
+      config,
+      logger,
+      webhookSink,
+      evidenceStore,
+      startTime
+    );
+    watchers.push(watcher);
+  }
+
+  // Run initial scans for all chains concurrently
+  logger.info({ chainCount: chains.length }, 'Running initial scans');
+  await Promise.all(watchers.map(w => w.runScan().catch(err => {
+    logger.error({ error: err }, 'Initial scan failed');
+  })));
 
   // Graceful shutdown
   const shutdown = () => {
     logger.info('Shutting down worker');
-    clearInterval(intervalId);
-    if (heartbeatIntervalId) {
-      clearInterval(heartbeatIntervalId);
+
+    // Clear all intervals
+    for (const watcher of watchers) {
+      clearInterval(watcher.intervalId);
+      if (watcher.heartbeatIntervalId) {
+        clearInterval(watcher.heartbeatIntervalId);
+      }
     }
+
     metricsServer.close();
     process.exit(0);
   };
@@ -516,7 +586,7 @@ async function main() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  logger.info('Worker running. Press Ctrl+C to stop.');
+  logger.info({ chainCount: chains.length }, 'Worker running. Press Ctrl+C to stop.');
 }
 
 // Run if this is the main module

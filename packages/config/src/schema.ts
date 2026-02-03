@@ -48,6 +48,33 @@ export const irsbContractsSchema = z.object({
 export type IrsbContracts = z.infer<typeof irsbContractsSchema>;
 
 /**
+ * Multi-chain entry - combines chain config with its contracts
+ */
+export const chainEntrySchema = z.object({
+  /** Human-readable name for this chain (e.g., "sepolia", "mainnet") */
+  name: z.string().min(1),
+
+  /** RPC URL for this chain */
+  rpcUrl: z.string().url('RPC_URL must be a valid URL'),
+
+  /** Chain ID */
+  chainId: z.coerce.number().int().positive('CHAIN_ID must be a positive integer'),
+
+  /** IRSB contract addresses for this chain */
+  contracts: irsbContractsSchema,
+
+  /** Whether this chain watcher is enabled (default: true) */
+  enabled: z.coerce.boolean().default(true),
+});
+export type ChainEntry = z.infer<typeof chainEntrySchema>;
+
+/**
+ * Multi-chain configuration - array of chain entries
+ */
+export const multiChainConfigSchema = z.array(chainEntrySchema).min(1);
+export type MultiChainConfig = z.infer<typeof multiChainConfigSchema>;
+
+/**
  * Local signer configuration
  */
 export const localSignerConfigSchema = z.object({
@@ -235,8 +262,19 @@ export type WebhookConfig = z.infer<typeof webhookConfigSchema>;
  * Complete watchtower configuration
  */
 export const watchtowerConfigSchema = z.object({
+  /** Single chain config (for backward compatibility) */
   chain: chainConfigSchema,
+
+  /** Single chain contracts (for backward compatibility) */
   contracts: irsbContractsSchema,
+
+  /**
+   * Multi-chain configuration (optional)
+   * If provided, enables concurrent watchers for multiple chains.
+   * When set, `chain` and `contracts` are ignored.
+   */
+  chains: multiChainConfigSchema.optional(),
+
   signer: signerConfigSchema.optional(),
   api: apiConfigSchema,
   worker: workerConfigSchema,
@@ -248,3 +286,23 @@ export const watchtowerConfigSchema = z.object({
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 export type WatchtowerConfig = z.infer<typeof watchtowerConfigSchema>;
+
+/**
+ * Get effective chains from config
+ * Returns array of chain entries - either from `chains` (multi-chain mode)
+ * or a single entry built from `chain` + `contracts` (single-chain mode)
+ */
+export function getEffectiveChains(config: WatchtowerConfig): ChainEntry[] {
+  if (config.chains && config.chains.length > 0) {
+    return config.chains.filter(c => c.enabled);
+  }
+
+  // Single-chain mode - convert to array format
+  return [{
+    name: `chain-${config.chain.chainId}`,
+    rpcUrl: config.chain.rpcUrl,
+    chainId: config.chain.chainId,
+    contracts: config.contracts,
+    enabled: true,
+  }];
+}

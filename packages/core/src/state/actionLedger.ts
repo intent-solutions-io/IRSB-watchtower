@@ -44,18 +44,23 @@ interface SerializedActionEntry {
  * to ensure we haven't already acted on a given receipt.
  *
  * Persists to JSON file for durability across restarts.
+ * Each chain has its own ledger file when chainId is provided.
  */
 export class ActionLedger {
   private entries: Map<string, ActionEntry> = new Map();
   private filePath: string;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, chainId?: number) {
     // Ensure state directory exists
     if (!existsSync(stateDir)) {
       mkdirSync(stateDir, { recursive: true });
     }
 
-    this.filePath = join(stateDir, 'action-ledger.json');
+    // Use chain-specific file path if chainId provided
+    const fileName = chainId !== undefined
+      ? `action-ledger-${chainId}.json`
+      : 'action-ledger.json';
+    this.filePath = join(stateDir, fileName);
     this.load();
   }
 
