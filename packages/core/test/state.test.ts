@@ -132,6 +132,58 @@ describe('ActionLedger', () => {
     const entries = ledger.getAllEntries();
     expect(entries.length).toBe(2);
   });
+
+  it('should create chain-specific ledger file when chainId is provided', () => {
+    const chainId = 11155111;
+    const chainLedger = new ActionLedger(TEST_STATE_DIR, chainId);
+
+    chainLedger.recordAction({
+      receiptId: '0xabc123',
+      actionType: 'OPEN_DISPUTE',
+      txHash: '0xtx123',
+      blockNumber: 100n,
+      findingId: 'finding-1',
+    });
+
+    // Chain-specific file should exist
+    expect(existsSync(join(TEST_STATE_DIR, `action-ledger-${chainId}.json`))).toBe(true);
+
+    // Global ledger should not see the chain-specific entry
+    const globalLedger = new ActionLedger(TEST_STATE_DIR);
+    expect(globalLedger.hasActed('0xabc123')).toBe(false);
+
+    // New chain ledger should see its own entry
+    const chainLedger2 = new ActionLedger(TEST_STATE_DIR, chainId);
+    expect(chainLedger2.hasActed('0xabc123')).toBe(true);
+  });
+
+  it('should isolate ledgers between different chains', () => {
+    const ledgerChain1 = new ActionLedger(TEST_STATE_DIR, 1);
+    const ledgerChain11155111 = new ActionLedger(TEST_STATE_DIR, 11155111);
+
+    ledgerChain1.recordAction({
+      receiptId: '0xabc123',
+      actionType: 'OPEN_DISPUTE',
+      txHash: '0xtx123',
+      blockNumber: 100n,
+      findingId: 'finding-1',
+    });
+
+    // Same receipt ID should not be blocked on different chain
+    expect(ledgerChain11155111.hasActed('0xabc123')).toBe(false);
+
+    // Can record same receipt on different chain
+    ledgerChain11155111.recordAction({
+      receiptId: '0xabc123',
+      actionType: 'OPEN_DISPUTE',
+      txHash: '0xtx456',
+      blockNumber: 200n,
+      findingId: 'finding-2',
+    });
+
+    expect(ledgerChain1.size).toBe(1);
+    expect(ledgerChain11155111.size).toBe(1);
+  });
 });
 
 describe('BlockCursor', () => {

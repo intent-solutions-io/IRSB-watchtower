@@ -354,8 +354,8 @@ function createChainWatcher(
 ): { intervalId: NodeJS.Timeout; heartbeatIntervalId?: NodeJS.Timeout; runScan: () => Promise<Finding[]> } {
   const chainLogger = logger.child({ chain: chainEntry.name, chainId: chainEntry.chainId });
 
-  // Initialize state management for this chain
-  const ledger = new ActionLedger(config.rules.stateDir);
+  // Initialize state management for this chain (chain-specific ledger file)
+  const ledger = new ActionLedger(config.rules.stateDir, chainEntry.chainId);
   const cursor = new BlockCursor(config.rules.stateDir, chainEntry.chainId);
 
   chainLogger.info(
