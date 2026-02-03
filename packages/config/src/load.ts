@@ -3,7 +3,44 @@ import {
   watchtowerConfigSchema,
   type SignerConfig,
   type SignerType,
+  type ChainEntry,
+  chainEntrySchema,
 } from './schema.js';
+
+/**
+ * Parse multi-chain config from CHAINS_CONFIG env var (JSON array)
+ */
+function parseMultiChainConfig(env: NodeJS.ProcessEnv): ChainEntry[] | undefined {
+  const chainsJson = env.CHAINS_CONFIG;
+  if (!chainsJson) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(chainsJson);
+    if (!Array.isArray(parsed)) {
+      throw new Error('CHAINS_CONFIG must be a JSON array');
+    }
+
+    // Validate each entry
+    const chains: ChainEntry[] = [];
+    for (const entry of parsed) {
+      const result = chainEntrySchema.safeParse(entry);
+      if (!result.success) {
+        const errors = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+        throw new Error(`Invalid chain entry: ${errors}`);
+      }
+      chains.push(result.data);
+    }
+
+    return chains;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error('CHAINS_CONFIG is not valid JSON');
+    }
+    throw error;
+  }
+}
 
 /**
  * Build signer config from environment variables based on type
@@ -72,6 +109,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WatchtowerConf
       intentReceiptHub: env.INTENT_RECEIPT_HUB_ADDRESS,
       disputeModule: env.DISPUTE_MODULE_ADDRESS,
     },
+    chains: parseMultiChainConfig(env),
     signer: buildSignerConfig(env),
     api: {
       port: env.API_PORT,
