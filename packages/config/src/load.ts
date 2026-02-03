@@ -108,6 +108,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WatchtowerConf
       sendHeartbeat: env.WEBHOOK_SEND_HEARTBEAT,
       heartbeatIntervalMs: env.WEBHOOK_HEARTBEAT_INTERVAL_MS,
     },
+    resilience: {
+      maxRetries: env.RPC_MAX_RETRIES,
+      retryBaseDelayMs: env.RPC_RETRY_BASE_DELAY_MS,
+      retryMaxDelayMs: env.RPC_RETRY_MAX_DELAY_MS,
+      circuitBreakerFailureThreshold: env.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+      circuitBreakerResetTimeoutMs: env.CIRCUIT_BREAKER_RESET_TIMEOUT_MS,
+      circuitBreakerSuccessThreshold: env.CIRCUIT_BREAKER_SUCCESS_THRESHOLD,
+    },
     nodeEnv: env.NODE_ENV,
   };
 

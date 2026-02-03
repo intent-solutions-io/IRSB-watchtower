@@ -40,6 +40,7 @@ describe('config schema', () => {
       webhook: {
         enabled: false,
       },
+      resilience: {},
       nodeEnv: 'development',
     };
 
@@ -83,6 +84,7 @@ describe('config schema', () => {
       rules: {},
       logging: {},
       webhook: {},
+      resilience: {},
     };
 
     const result = watchtowerConfigSchema.safeParse(config);
@@ -95,6 +97,8 @@ describe('config schema', () => {
       expect(result.data.rules.dryRun).toBe(true);
       expect(result.data.rules.challengeWindowSeconds).toBe(3600);
       expect(result.data.webhook.enabled).toBe(false);
+      expect(result.data.resilience.maxRetries).toBe(3);
+      expect(result.data.resilience.circuitBreakerFailureThreshold).toBe(5);
     }
   });
 });

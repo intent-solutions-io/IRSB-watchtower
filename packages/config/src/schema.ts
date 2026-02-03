@@ -157,6 +157,30 @@ export const loggingConfigSchema = z.object({
 export type LoggingConfig = z.infer<typeof loggingConfigSchema>;
 
 /**
+ * Resilience configuration for RPC retry and circuit breaker
+ */
+export const resilienceConfigSchema = z.object({
+  /** Maximum retry attempts for RPC calls */
+  maxRetries: z.coerce.number().int().min(0).max(10).default(3),
+
+  /** Base delay in milliseconds for retry backoff */
+  retryBaseDelayMs: z.coerce.number().int().min(100).max(60000).default(1000),
+
+  /** Maximum delay in milliseconds for retry backoff */
+  retryMaxDelayMs: z.coerce.number().int().min(100).max(300000).default(10000),
+
+  /** Number of failures before opening circuit breaker */
+  circuitBreakerFailureThreshold: z.coerce.number().int().min(1).max(100).default(5),
+
+  /** Time in ms before attempting to close circuit */
+  circuitBreakerResetTimeoutMs: z.coerce.number().int().min(1000).max(300000).default(30000),
+
+  /** Number of successes in half-open state to close circuit */
+  circuitBreakerSuccessThreshold: z.coerce.number().int().min(1).max(10).default(2),
+});
+export type ResilienceConfig = z.infer<typeof resilienceConfigSchema>;
+
+/**
  * Webhook configuration
  */
 export const webhookConfigSchema = z.object({
@@ -201,6 +225,7 @@ export const watchtowerConfigSchema = z.object({
   rules: ruleConfigSchema,
   logging: loggingConfigSchema,
   webhook: webhookConfigSchema,
+  resilience: resilienceConfigSchema,
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 export type WatchtowerConfig = z.infer<typeof watchtowerConfigSchema>;
