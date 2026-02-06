@@ -54,8 +54,14 @@ function runMigrations(db: Database.Database): void {
       .filter((f) => f.endsWith('.sql'))
       .sort();
   } catch {
-    // migrations dir might not exist at runtime if built — use bundled SQL
-    migrationFiles = [];
+    // migrations dir not found (bundled build) — fall back to inline migrations
+    applyInlineMigrations(db, applied);
+    return;
+  }
+
+  if (migrationFiles.length === 0) {
+    applyInlineMigrations(db, applied);
+    return;
   }
 
   for (const file of migrationFiles) {
@@ -65,6 +71,16 @@ function runMigrations(db: Database.Database): void {
     db.exec(sql);
     db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(
       file,
+      Math.floor(Date.now() / 1000),
+    );
+  }
+}
+
+function applyInlineMigrations(db: Database.Database, applied: Set<string>): void {
+  if (!applied.has('001_init.sql')) {
+    db.exec(MIGRATION_001);
+    db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(
+      '001_init.sql',
       Math.floor(Date.now() / 1000),
     );
   }
@@ -118,7 +134,7 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS snapshots (
   snapshot_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   observed_at INTEGER NOT NULL,
   signals_json TEXT NOT NULL
 );
@@ -126,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON snapshots(agent_id, observed_a
 
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   severity TEXT NOT NULL,
   type TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -138,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_agent ON alerts(agent_id, is_active, creat
 
 CREATE TABLE IF NOT EXISTS risk_reports (
   report_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   generated_at INTEGER NOT NULL,
   overall_risk INTEGER NOT NULL,
   confidence TEXT NOT NULL,

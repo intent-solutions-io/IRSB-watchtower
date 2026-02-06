@@ -2,17 +2,22 @@ import type Database from 'better-sqlite3';
 import type { Agent } from '../schemas/index.js';
 
 export function upsertAgent(db: Database.Database, agent: Agent): void {
+  const status = agent.status ?? null;
+  const labelsJson = agent.labels ? JSON.stringify(agent.labels) : null;
+
   db.prepare(
     `INSERT INTO agents (agent_id, created_at, status, labels_json)
-     VALUES (?, ?, ?, ?)
+     VALUES (?, ?, COALESCE(?, 'ACTIVE'), COALESCE(?, '[]'))
      ON CONFLICT(agent_id) DO UPDATE SET
-       status = COALESCE(excluded.status, agents.status),
-       labels_json = COALESCE(excluded.labels_json, agents.labels_json)`,
+       status = COALESCE(?, agents.status),
+       labels_json = COALESCE(?, agents.labels_json)`,
   ).run(
     agent.agentId,
     agent.createdAt ?? Math.floor(Date.now() / 1000),
-    agent.status ?? 'ACTIVE',
-    JSON.stringify(agent.labels ?? []),
+    status,
+    labelsJson,
+    status,
+    labelsJson,
   );
 }
 

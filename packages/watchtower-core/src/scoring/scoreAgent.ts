@@ -1,4 +1,4 @@
-import type { Agent, Snapshot, RiskReport, Alert, Signal, EvidenceLink, Confidence } from '../schemas/index.js';
+import type { Agent, Snapshot, RiskReport, Alert, EvidenceLink, Confidence } from '../schemas/index.js';
 import { canonicalJson, sha256Hex } from '../utils/canonical.js';
 import { sortSignals, sortEvidence } from '../utils/sort.js';
 
@@ -14,10 +14,7 @@ export function scoreAgent(
   snapshots: Snapshot[],
   generatedAt: number,
 ): { report: RiskReport; newAlerts: Alert[] } {
-  const allSignals: Signal[] = [];
-  for (const snap of snapshots) {
-    allSignals.push(...snap.signals);
-  }
+  const allSignals = snapshots.flatMap((snap) => snap.signals);
 
   // Calculate overall risk: sum(points * weight), capped at 100
   let rawScore = 0;

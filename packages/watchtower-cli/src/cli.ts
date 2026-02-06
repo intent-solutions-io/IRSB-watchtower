@@ -14,6 +14,7 @@ import {
   insertAlerts,
   getLatestRiskReport,
   listAlerts,
+  AgentStatusEnum,
   SignalSchema,
   canonicalJson,
   sha256Hex,
@@ -54,12 +55,18 @@ program
   .option('--labels <labels>', 'Comma-separated labels')
   .option('--status <status>', 'Agent status (ACTIVE, PROBATION, BLOCKED)', 'ACTIVE')
   .action((options: { agentId: string; labels?: string; status?: string }) => {
+    const statusResult = AgentStatusEnum.safeParse(options.status ?? 'ACTIVE');
+    if (!statusResult.success) {
+      console.error(pc.red(`  Invalid status: '${options.status}'. Must be one of: ${AgentStatusEnum.options.join(', ')}`));
+      process.exit(1);
+    }
+
     const db = openDb();
     try {
       upsertAgent(db, {
         agentId: options.agentId,
-        labels: options.labels ? options.labels.split(',').map((l) => l.trim()) : [],
-        status: (options.status as 'ACTIVE' | 'PROBATION' | 'BLOCKED') ?? 'ACTIVE',
+        labels: options.labels ? options.labels.split(',').map((l) => l.trim()) : undefined,
+        status: statusResult.data,
       });
       console.log(`  ${pc.green('✓')} Agent ${pc.cyan(options.agentId)} upserted`);
     } finally {
@@ -74,9 +81,17 @@ program
   .requiredOption('--agentId <id>', 'Agent identifier')
   .requiredOption('--signals <path>', 'Path to JSON file with signals array')
   .action((options: { agentId: string; signals: string }) => {
+    let raw: string;
+    try {
+      raw = readFileSync(options.signals, 'utf-8');
+    } catch (err) {
+      console.error(pc.red(`  Error reading signals file: ${options.signals}`));
+      console.error(pc.gray(`  ${(err as Error).message}`));
+      process.exit(1);
+    }
+
     const db = openDb();
     try {
-      const raw = readFileSync(options.signals, 'utf-8');
       const parsed = JSON.parse(raw) as unknown;
       const signals = z.array(SignalSchema).parse(parsed);
 

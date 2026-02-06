@@ -78,6 +78,15 @@ describe('agentStore', () => {
     expect(read!.labels).toEqual(['flagged']);
   });
 
+  it('should preserve existing status when upserting without status', () => {
+    upsertAgent(db, { agentId: 'agent-partial', status: 'BLOCKED', labels: ['flagged'] });
+    upsertAgent(db, { agentId: 'agent-partial' });
+
+    const read = getAgent(db, 'agent-partial');
+    expect(read!.status).toBe('BLOCKED');
+    expect(read!.labels).toEqual(['flagged']);
+  });
+
   it('should list all agents', () => {
     upsertAgent(db, { agentId: 'a-001' });
     upsertAgent(db, { agentId: 'a-002' });
@@ -88,6 +97,7 @@ describe('agentStore', () => {
 
 describe('snapshotStore', () => {
   it('should insert and retrieve snapshots', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
     const snapshot: Snapshot = {
       snapshotId: 'snap-001',
       agentId: 'agent-001',
@@ -103,6 +113,7 @@ describe('snapshotStore', () => {
   });
 
   it('should return snapshots ordered by observedAt desc', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
     insertSnapshot(db, {
       snapshotId: 'snap-old',
       agentId: 'agent-001',
@@ -122,6 +133,7 @@ describe('snapshotStore', () => {
   });
 
   it('should respect limit', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
     for (let i = 0; i < 5; i++) {
       insertSnapshot(db, {
         snapshotId: `snap-${i}`,
@@ -173,6 +185,7 @@ describe('reportStore', () => {
 
 describe('alertStore', () => {
   it('should insert and retrieve alerts', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
     insertAlerts(db, [
       {
         alertId: 'alert-001',
@@ -201,6 +214,8 @@ describe('alertStore', () => {
   });
 
   it('should filter by agentId', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
+    upsertAgent(db, { agentId: 'agent-002' });
     insertAlerts(db, [
       {
         alertId: 'alert-a1',
@@ -230,6 +245,7 @@ describe('alertStore', () => {
   });
 
   it('should filter active only', () => {
+    upsertAgent(db, { agentId: 'agent-001' });
     insertAlerts(db, [
       {
         alertId: 'alert-active',

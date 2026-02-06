@@ -122,11 +122,22 @@ pnpm build
 
 ```bash
 export WATCHTOWER_DB_PATH=/tmp/wt-test.db
+cat > /tmp/wt-test-signals.json <<EOL
+[
+  {
+    "signalId": "sig-smoke-test",
+    "severity": "MEDIUM",
+    "weight": 0.7,
+    "observedAt": 1700000000,
+    "evidence": [{ "type": "test", "ref": "smoke" }]
+  }
+]
+EOL
 npx wt init-db
 npx wt upsert-agent --agentId test1
-npx wt add-snapshot --agentId test1 --signals test-signals.json
+npx wt add-snapshot --agentId test1 --signals /tmp/wt-test-signals.json
 npx wt score-agent --agentId test1
 npx wt risk-report test1
 npx wt list-alerts
-rm /tmp/wt-test.db
+rm /tmp/wt-test.db /tmp/wt-test-signals.json
 ```

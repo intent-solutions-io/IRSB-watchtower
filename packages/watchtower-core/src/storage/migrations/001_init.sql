@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS snapshots (
   snapshot_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   observed_at INTEGER NOT NULL,
   signals_json TEXT NOT NULL
 );
@@ -15,7 +15,7 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON snapshots(agent_id, observed_a
 
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   severity TEXT NOT NULL,
   type TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_agent ON alerts(agent_id, is_active, creat
 
 CREATE TABLE IF NOT EXISTS risk_reports (
   report_id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
   generated_at INTEGER NOT NULL,
   overall_risk INTEGER NOT NULL,
   confidence TEXT NOT NULL,
