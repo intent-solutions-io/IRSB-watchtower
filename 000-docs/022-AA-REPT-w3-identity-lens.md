@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-06 00:49 CST
 **Branch**: `feature/w3-identity-lens`
-**PR**: (link pending)
+**PR**: https://github.com/intent-solutions-io/irsb-watchtower/pull/12
 
 ## What Was Delivered
 
