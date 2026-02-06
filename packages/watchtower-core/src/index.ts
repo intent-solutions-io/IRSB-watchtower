@@ -43,3 +43,32 @@ export {
   insertRiskReport,
   getLatestRiskReport,
 } from './storage/index.js';
+
+// Integrations
+export {
+  SolverReceiptV0Schema,
+  ArtifactEntrySchema,
+  normalizeReceipt,
+} from './integrations/index.js';
+
+export type {
+  SolverReceiptV0,
+  ArtifactEntry,
+  NormalizedReceipt,
+  DeliveredArtifact,
+} from './integrations/index.js';
+
+// Behavior
+export {
+  verifyEvidence,
+  deriveBehaviorSignals,
+  ingestReceipt,
+} from './behavior/index.js';
+
+export type {
+  VerificationResult,
+  VerificationFailure,
+  VerifyOptions,
+  FailureCode,
+  IngestResult,
+} from './behavior/index.js';
