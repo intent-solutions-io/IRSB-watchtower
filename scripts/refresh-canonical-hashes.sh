@@ -26,11 +26,11 @@ fi
     if [ "$first" = true ]; then
       first=false
     else
-      echo ","
+      printf ",\n"
     fi
     printf '  "%s": "%s"' "$filename" "$hash"
   done
-  echo ""
+  printf "\n"
   echo "}"
 } > "$HASH_FILE"
 
