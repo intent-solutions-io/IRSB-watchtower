@@ -40,9 +40,11 @@ import {
   createLeaf,
   appendLeaf,
   verifyLogFile,
-  readLogFile,
+  readLogFileTail,
   logFilePath,
   listAgents,
+  getLatestRiskReportsByAgents,
+  getActiveAlertCountsByAgent,
 } from '@irsb-watchtower/watchtower-core';
 import type { ContextDataSource, AddressTagMap, ReportSignature } from '@irsb-watchtower/watchtower-core';
 import { RpcProvider } from '@irsb-watchtower/chain';
@@ -843,24 +845,39 @@ program
   });
 
 // ── agents:list ─────────────────────────────────────────────────────────
+const AgentsListOptsSchema = z.object({
+  limit: z.coerce.number().int().positive().default(100),
+});
+
 program
   .command('agents:list')
   .description('List all agents with latest risk score')
-  .option('--limit <n>', 'Max agents to display', '100')
+  .option('--limit <n>', 'Max agents to display')
   .option('--json', 'Output as JSON')
-  .action((options: { limit: string; json?: boolean }) => {
+  .action((options: { limit?: string; json?: boolean }) => {
+    const parsed = AgentsListOptsSchema.safeParse({
+      limit: options.limit ?? process.env['WATCHTOWER_AGENTS_LIST_LIMIT'],
+    });
+    if (!parsed.success) {
+      console.error(pc.red(`  Invalid --limit: ${options.limit}`));
+      process.exit(1);
+    }
+
     const db = openDb();
     try {
-      const agents = listAgents(db).slice(0, parseInt(options.limit, 10));
+      const agents = listAgents(db).slice(0, parsed.data.limit);
+      const agentIds = agents.map((a) => a.agentId);
+      const reportMap = getLatestRiskReportsByAgents(db, agentIds);
+      const alertCountMap = getActiveAlertCountsByAgent(db, agentIds);
+
       const enriched = agents.map((agent) => {
-        const report = getLatestRiskReport(db, agent.agentId);
-        const activeAlerts = listAlerts(db, { agentId: agent.agentId, activeOnly: true });
+        const report = reportMap.get(agent.agentId);
         return {
           agentId: agent.agentId,
           status: agent.status,
           overallRisk: report?.overallRisk ?? null,
           confidence: report?.confidence ?? null,
-          activeAlertsCount: activeAlerts.length,
+          activeAlertsCount: alertCountMap.get(agent.agentId) ?? 0,
         };
       });
 
@@ -877,7 +894,7 @@ program
       console.log(pc.bold(`\n  Agents (${enriched.length})\n`));
       for (const a of enriched) {
         const risk = a.overallRisk !== null ? riskColor(a.overallRisk) : pc.gray('N/A');
-        console.log(`  ${pc.cyan(a.agentId)}  ${risk}  ${pc.gray(a.status)}  alerts:${a.activeAlertsCount}`);
+        console.log(`  ${pc.cyan(a.agentId)}  ${risk}  ${pc.gray(a.status ?? 'ACTIVE')}  alerts:${a.activeAlertsCount}`);
       }
       console.log('');
     } finally {
@@ -886,14 +903,28 @@ program
   });
 
 // ── transparency:tail ───────────────────────────────────────────────────
+const TransparencyTailOptsSchema = z.object({
+  n: z.coerce.number().int().positive().default(50),
+  logDir: z.string().min(1).default('./data/transparency'),
+});
+
 program
   .command('transparency:tail')
   .description('Show last N leaves from transparency log')
   .option('--date <YYYY-MM-DD>', 'Date (default: today)')
-  .option('--n <count>', 'Number of leaves to show', '50')
-  .option('--log-dir <dir>', 'Transparency log directory', './data/transparency')
+  .option('--n <count>', 'Number of leaves to show')
+  .option('--log-dir <dir>', 'Transparency log directory')
   .option('--json', 'Output as JSON')
-  .action((options: { date?: string; n: string; logDir: string; json?: boolean }) => {
+  .action((options: { date?: string; n?: string; logDir?: string; json?: boolean }) => {
+    const parsed = TransparencyTailOptsSchema.safeParse({
+      n: options.n ?? process.env['WATCHTOWER_TRANSPARENCY_TAIL_N'],
+      logDir: options.logDir ?? process.env['WATCHTOWER_LOG_DIR'],
+    });
+    if (!parsed.success) {
+      console.error(pc.red(`  Invalid options: ${parsed.error.issues.map((i) => i.message).join(', ')}`));
+      process.exit(1);
+    }
+
     const dateStr = options.date ?? new Date().toISOString().slice(0, 10);
     const date = new Date(dateStr + 'T00:00:00Z');
     if (isNaN(date.getTime())) {
@@ -901,10 +932,8 @@ program
       process.exit(1);
     }
 
-    const filePath = logFilePath(resolve(options.logDir), date);
-    const leaves = readLogFile(filePath);
-    const count = parseInt(options.n, 10);
-    const tail = leaves.slice(-count);
+    const filePath = logFilePath(resolve(parsed.data.logDir), date);
+    const { leaves: tail, total } = readLogFileTail(filePath, parsed.data.n);
 
     if (options.json) {
       console.log(JSON.stringify(tail, null, 2));
@@ -916,7 +945,7 @@ program
       return;
     }
 
-    console.log(pc.bold(`\n  Transparency Log — ${dateStr} (last ${tail.length} of ${leaves.length})\n`));
+    console.log(pc.bold(`\n  Transparency Log — ${dateStr} (last ${tail.length} of ${total})\n`));
     for (const leaf of tail) {
       const time = new Date(leaf.writtenAt * 1000).toISOString().slice(11, 19);
       console.log(`  ${pc.gray(leaf.leafId.slice(0, 12))}  ${pc.cyan(leaf.agentId)}  ${riskColor(leaf.overallRisk)}  ${pc.gray(time)}`);

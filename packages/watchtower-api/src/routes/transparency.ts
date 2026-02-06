@@ -5,6 +5,42 @@ import {
   logFilePath,
 } from '@irsb-watchtower/watchtower-core';
 
+export interface DayVerification {
+  date: string;
+  totalLeaves: number;
+  validLeaves: number;
+  invalidLeaves: number;
+  corrupt: boolean;
+}
+
+/**
+ * Verify the last `days` days of transparency logs.
+ * Shared by the JSON API and the HTML dashboard.
+ */
+export function verifyRecentDays(logDir: string, publicKey: string, days = 7): DayVerification[] {
+  const today = new Date();
+  const results: DayVerification[] = [];
+
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const date = new Date(dateStr + 'T00:00:00Z');
+    const filePath = logFilePath(logDir, date);
+    const result = verifyLogFile(filePath, publicKey);
+
+    results.push({
+      date: dateStr,
+      totalLeaves: result.totalLeaves,
+      validLeaves: result.validLeaves,
+      invalidLeaves: result.invalidLeaves,
+      corrupt: result.invalidLeaves > 0,
+    });
+  }
+
+  return results;
+}
+
 export async function transparencyRoutes(
   fastify: FastifyInstance,
   opts: { logDir: string; publicKey?: string },
@@ -20,26 +56,7 @@ export async function transparencyRoutes(
       return reply.status(503).send({ error: 'no public key configured' });
     }
 
-    const today = new Date();
-    const recentVerifications = [];
-
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setUTCDate(d.getUTCDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const date = new Date(dateStr + 'T00:00:00Z');
-      const filePath = logFilePath(logDir, date);
-      const result = verifyLogFile(filePath, publicKey);
-
-      recentVerifications.push({
-        date: dateStr,
-        totalLeaves: result.totalLeaves,
-        validLeaves: result.validLeaves,
-        invalidLeaves: result.invalidLeaves,
-        corrupt: result.invalidLeaves > 0,
-      });
-    }
-
+    const recentVerifications = verifyRecentDays(logDir, publicKey);
     const latest = recentVerifications[0]!;
     return reply.send({
       latestDate: latest.date,

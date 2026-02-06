@@ -40,8 +40,10 @@ export {
   getLatestSnapshots,
   insertAlerts,
   listAlerts,
+  getActiveAlertCountsByAgent,
   insertRiskReport,
   getLatestRiskReport,
+  getLatestRiskReportsByAgents,
 } from './storage/index.js';
 
 // Integrations
@@ -163,6 +165,7 @@ export {
   appendLeaf,
   verifyLogFile,
   readLogFile,
+  readLogFileTail,
 } from './transparency/index.js';
 
 export type {

@@ -4,10 +4,11 @@ import {
   listAgents,
   getAgent,
   getLatestRiskReport,
+  getLatestRiskReportsByAgents,
+  getActiveAlertCountsByAgent,
   listAlerts,
-  verifyLogFile,
-  logFilePath,
 } from '@irsb-watchtower/watchtower-core';
+import { verifyRecentDays } from './transparency.js';
 
 // ── XSS helper ──────────────────────────────────────────────────────────
 function escapeHtml(str: string): string {
@@ -60,9 +61,17 @@ function riskBadge(risk: number | null): string {
   return `<span class="risk-none">${risk}/100</span>`;
 }
 
+const SEVERITY_CSS: Record<string, string> = {
+  CRITICAL: 'critical',
+  HIGH: 'high',
+  MEDIUM: 'medium',
+  LOW: 'low',
+  INFO: 'info',
+};
+
 function severityBadge(severity: string): string {
-  const s = severity.toLowerCase();
-  return `<span class="severity-${s}">${escapeHtml(severity)}</span>`;
+  const css = SEVERITY_CSS[severity.toUpperCase()] ?? 'info';
+  return `<span class="severity-${css}">${escapeHtml(severity)}</span>`;
 }
 
 function formatTs(epoch: number): string {
@@ -79,9 +88,12 @@ export async function uiRoutes(
   // ── Home / Agent Overview ─────────────────────────────────────────────
   fastify.get('/', async (_request, reply) => {
     const agents = listAgents(db);
+    const agentIds = agents.map((a) => a.agentId);
+    const reportMap = getLatestRiskReportsByAgents(db, agentIds);
+    const alertCountMap = getActiveAlertCountsByAgent(db, agentIds);
+
     const rows = agents.map((agent) => {
-      const report = getLatestRiskReport(db, agent.agentId);
-      const activeAlerts = listAlerts(db, { agentId: agent.agentId, activeOnly: true });
+      const report = reportMap.get(agent.agentId);
       const risk = report?.overallRisk ?? null;
       const confidence = report?.confidence ?? 'N/A';
       const lastUpdated = report?.generatedAt ?? agent.createdAt ?? 0;
@@ -90,7 +102,7 @@ export async function uiRoutes(
         <td>${riskBadge(risk)}</td>
         <td>${escapeHtml(String(confidence))}</td>
         <td>${escapeHtml(agent.status ?? 'ACTIVE')}</td>
-        <td>${activeAlerts.length}</td>
+        <td>${alertCountMap.get(agent.agentId) ?? 0}</td>
         <td class="muted">${formatTs(lastUpdated)}</td>
       </tr>`;
     });
@@ -200,25 +212,7 @@ export async function uiRoutes(
       );
     }
 
-    const today = new Date();
-    const verifications = [];
-
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setUTCDate(d.getUTCDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const date = new Date(dateStr + 'T00:00:00Z');
-      const filePath = logFilePath(logDir, date);
-      const result = verifyLogFile(filePath, publicKey);
-
-      verifications.push({
-        date: dateStr,
-        totalLeaves: result.totalLeaves,
-        validLeaves: result.validLeaves,
-        invalidLeaves: result.invalidLeaves,
-      });
-    }
-
+    const verifications = verifyRecentDays(logDir, publicKey);
     const latest = verifications[0]!;
     const rows = verifications
       .map(
@@ -227,7 +221,7 @@ export async function uiRoutes(
         <td>${v.totalLeaves}</td>
         <td>${v.validLeaves}</td>
         <td>${v.invalidLeaves}</td>
-        <td>${v.invalidLeaves > 0 ? '<span class="risk-critical">CORRUPT</span>' : '<span class="risk-low">OK</span>'}</td>
+        <td>${v.corrupt ? '<span class="risk-critical">CORRUPT</span>' : '<span class="risk-low">OK</span>'}</td>
       </tr>`,
       )
       .join('\n');

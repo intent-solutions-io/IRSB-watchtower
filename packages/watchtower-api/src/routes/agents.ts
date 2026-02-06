@@ -4,6 +4,8 @@ import {
   getAgent,
   listAgents,
   getLatestRiskReport,
+  getLatestRiskReportsByAgents,
+  getActiveAlertCountsByAgent,
   listAlerts,
 } from '@irsb-watchtower/watchtower-core';
 
@@ -13,12 +15,16 @@ export async function agentRoutes(fastify: FastifyInstance, opts: { db: Database
   /**
    * GET /v1/agents
    * List all agents with latest risk score and active alert count.
+   * Uses bulk queries (3 total) to avoid N+1.
    */
   fastify.get('/v1/agents', async (_request, reply) => {
     const agents = listAgents(db);
+    const agentIds = agents.map((a) => a.agentId);
+    const reportMap = getLatestRiskReportsByAgents(db, agentIds);
+    const alertCountMap = getActiveAlertCountsByAgent(db, agentIds);
+
     const enriched = agents.map((agent) => {
-      const report = getLatestRiskReport(db, agent.agentId);
-      const activeAlerts = listAlerts(db, { agentId: agent.agentId, activeOnly: true });
+      const report = reportMap.get(agent.agentId);
       return {
         agentId: agent.agentId,
         status: agent.status,
@@ -26,7 +32,7 @@ export async function agentRoutes(fastify: FastifyInstance, opts: { db: Database
         overallRisk: report?.overallRisk ?? null,
         confidence: report?.confidence ?? null,
         lastUpdated: report?.generatedAt ?? agent.createdAt,
-        activeAlertsCount: activeAlerts.length,
+        activeAlertsCount: alertCountMap.get(agent.agentId) ?? 0,
       };
     });
     return reply.send({ agents: enriched });

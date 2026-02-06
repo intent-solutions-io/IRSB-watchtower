@@ -3,7 +3,7 @@
 **Timestamp**: 2026-02-06 01:16 CST (America/Chicago)
 **Epic**: W6 — Minimal Dashboard + CLI Operator UX
 **Branch**: `feature/w6-dashboard-cli`
-**PR**: TBD (open, not merged)
+**PR**: [#15](https://github.com/intent-solutions-io/irsb-watchtower/pull/15) (open, not merged)
 
 ## Commands Run
 
@@ -45,4 +45,4 @@ pnpm typecheck                        # zero errors
 
 ## PR Link
 
-_Pending — will be created after commit._
+https://github.com/intent-solutions-io/irsb-watchtower/pull/15
