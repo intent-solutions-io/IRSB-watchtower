@@ -29,6 +29,7 @@
 - [ ] `pnpm test` passes
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm lint` passes
+- [ ] Canonical check passes (`pnpm canonical:check`)
 - [ ] Manual testing (describe below)
 
 **Manual testing performed:**
@@ -63,6 +64,7 @@
 - [ ] I have added tests that prove my fix is effective or my feature works
 - [ ] New and existing tests pass locally with my changes
 - [ ] Any dependent changes have been merged and published
+- [ ] AAR drafted (required after merge)
 
 ## Related Issues
 
