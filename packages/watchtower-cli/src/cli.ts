@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 import {
   initDb,
   initDbWithInlineMigrations,
@@ -18,6 +19,10 @@ import {
   SignalSchema,
   canonicalJson,
   sha256Hex,
+  ingestReceipt,
+  verifyEvidence,
+  SolverReceiptV0Schema,
+  normalizeReceipt,
 } from '@irsb-watchtower/watchtower-core';
 import { z } from 'zod';
 
@@ -239,6 +244,91 @@ program
       }
     } finally {
       db.close();
+    }
+  });
+
+// ── ingest-receipt ───────────────────────────────────────────────────────
+program
+  .command('ingest-receipt')
+  .description('Ingest a solver evidence manifest into the watchtower DB')
+  .requiredOption('--agentId <id>', 'Agent identifier')
+  .requiredOption('--receipt <path>', 'Path to evidence manifest.json')
+  .option('--runDir <dir>', 'Run directory (inferred from receipt path if omitted)')
+  .action((options: { agentId: string; receipt: string; runDir?: string }) => {
+    const db = openDb();
+    try {
+      const result = ingestReceipt(db, options.agentId, options.receipt, options.runDir);
+
+      console.log(pc.bold(`\n  Ingest Result for ${pc.cyan(options.agentId)}\n`));
+      console.log(`  Receipt ID:   ${pc.gray(result.receiptId.slice(0, 16))}...`);
+      console.log(`  Verification: ${result.ok ? pc.green('PASS') : pc.red('FAIL')}`);
+      console.log(`  Overall Risk: ${riskColor(result.overallRisk)}`);
+      console.log(`  Report ID:    ${pc.gray(result.reportId.slice(0, 16))}...`);
+      console.log(`  New Alerts:   ${result.alertCount}`);
+      console.log('');
+    } catch (err) {
+      console.error(pc.red(`  Error: ${(err as Error).message}`));
+      process.exit(1);
+    } finally {
+      db.close();
+    }
+  });
+
+// ── verify-receipt ──────────────────────────────────────────────────────
+program
+  .command('verify-receipt')
+  .description('Verify a solver evidence manifest (read-only, no DB writes)')
+  .requiredOption('--receipt <path>', 'Path to evidence manifest.json')
+  .option('--runDir <dir>', 'Run directory (inferred from receipt path if omitted)')
+  .action((options: { receipt: string; runDir?: string }) => {
+    try {
+      const absPath = resolve(options.receipt);
+      const rawBytes = readFileSync(absPath);
+      const manifestSha256 = sha256Hex(rawBytes);
+
+      // Parse manifest
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawBytes.toString('utf-8'));
+      } catch {
+        console.log(pc.red('  FAIL') + ' — manifest is not valid JSON');
+        process.exit(2);
+      }
+
+      const schemaResult = SolverReceiptV0Schema.safeParse(parsed);
+      if (!schemaResult.success) {
+        console.log(pc.red('  FAIL') + ' — manifest schema invalid');
+        for (const issue of schemaResult.error.issues) {
+          console.log(`    ${pc.gray(issue.path.join('.'))} ${issue.message}`);
+        }
+        process.exit(2);
+      }
+
+      const receipt = normalizeReceipt(schemaResult.data, manifestSha256);
+
+      // Infer runDir
+      const dir = dirname(absPath);
+      const effectiveRunDir =
+        options.runDir ??
+        (dir.endsWith('/evidence') || dir.endsWith('\\evidence')
+          ? dirname(dir)
+          : dir);
+
+      const result = verifyEvidence(receipt, effectiveRunDir);
+
+      if (result.ok) {
+        console.log(pc.green('  PASS') + ` — ${result.evidenceLinks.length} evidence links`);
+        process.exit(0);
+      } else {
+        console.log(pc.red('  FAIL') + ` — ${result.failures.length} failure(s)`);
+        for (const f of result.failures) {
+          console.log(`    ${pc.red(f.code)} ${f.path ? pc.gray(f.path) + ' ' : ''}${f.message}`);
+        }
+        process.exit(2);
+      }
+    } catch (err) {
+      console.error(pc.red(`  Error: ${(err as Error).message}`));
+      process.exit(1);
     }
   });
 
