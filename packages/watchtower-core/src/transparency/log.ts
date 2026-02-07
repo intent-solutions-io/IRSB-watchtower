@@ -91,3 +91,20 @@ export function readLogFile(filePath: string): TransparencyLeaf[] {
     .filter((l) => l.trim().length > 0)
     .map((l) => JSON.parse(l) as TransparencyLeaf);
 }
+
+/**
+ * Read the last N leaves from a log file without loading the entire file into
+ * memory at once as parsed objects. Reads raw bytes, splits lines, and only
+ * parses the tail slice.
+ */
+export function readLogFileTail(filePath: string, n: number): { leaves: TransparencyLeaf[]; total: number } {
+  if (!existsSync(filePath)) return { leaves: [], total: 0 };
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter((l) => l.trim().length > 0);
+  const total = lines.length;
+  const tail = lines.slice(-n);
+  return {
+    leaves: tail.map((l) => JSON.parse(l) as TransparencyLeaf),
+    total,
+  };
+}

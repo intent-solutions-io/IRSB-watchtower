@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **AI Context**: For ecosystem-wide reference (contracts, deployments, concepts, glossary), see [../AI-CONTEXT.md](../AI-CONTEXT.md)
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -38,7 +40,7 @@ Three-layer design with 9 packages and 3 apps:
 
 1. **Core** (`packages/core`) - Portable rule engine, Finding schema, ActionExecutor. Zero cloud deps.
 2. **Runner** (`apps/api`, `apps/worker`, `apps/cli`) - API server, background scanner, CLI utilities
-3. **Signer** (`packages/signers`) - Pluggable: LocalPrivateKey (implemented) | GCP KMS (stub) | Lit PKP (stub)
+3. **Signer** (`packages/signers`) - Pluggable: AgentPasskey (recommended) | LocalPrivateKey (dev only)
 
 Supporting packages: `config` (Zod schemas), `chain` (viem abstraction), `irsb-adapter` (contract client), `resilience` (retry + circuit breaker), `webhook` (HMAC-signed delivery), `evidence-store` (JSONL persistence), `metrics` (Prometheus)
 
@@ -172,6 +174,25 @@ All via environment variables (see `.env.example` for full list). Key groups:
 ## Known Stubs / TODOs
 
 - `createChainContext()` in worker uses mock data — real IRSB client integration pending
-- GCP KMS signer (`packages/signers`) - stub, not implemented
-- Lit PKP signer (`packages/signers`) - stub, not implemented
 - CLI `check-config` and `simulate` commands are stubs
+
+## Signing Integration (Agent Passkey)
+
+**Do NOT implement local signers.** Use the centralized `irsb-agent-passkey` service:
+
+| Signer Type | Implementation | Status |
+|-------------|---------------|--------|
+| `agent-passkey` | HTTP client to agent-passkey service | ✅ Recommended |
+| `local` | LocalPrivateKey (for testing only) | ⚠️ Dev only |
+| ~~`gcp-kms`~~ | Deprecated - use agent-passkey | ❌ Removed |
+| ~~`lit-pkp`~~ | Deprecated - use agent-passkey | ❌ Removed |
+
+**Agent Passkey Endpoint:** `https://irsb-agent-passkey-308207955734.us-central1.run.app`
+
+The watchtower submits typed actions (`OPEN_DISPUTE`, `SUBMIT_EVIDENCE`) to agent-passkey, which:
+- Validates policy (role authorization, rate limits)
+- Builds the full transaction (owns nonce management)
+- Signs with Lit Protocol PKP (threshold signatures)
+- Returns signed transaction or broadcasts directly
+
+See `../agent-passkey/CLAUDE.md` for API details.

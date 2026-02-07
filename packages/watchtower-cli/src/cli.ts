@@ -40,7 +40,11 @@ import {
   createLeaf,
   appendLeaf,
   verifyLogFile,
+  readLogFileTail,
   logFilePath,
+  listAgents,
+  getLatestRiskReportsByAgents,
+  getActiveAlertCountsByAgent,
 } from '@irsb-watchtower/watchtower-core';
 import type { ContextDataSource, AddressTagMap, ReportSignature } from '@irsb-watchtower/watchtower-core';
 import { RpcProvider } from '@irsb-watchtower/chain';
@@ -190,13 +194,19 @@ program
   .command('risk-report')
   .description('Show the latest risk report for an agent')
   .argument('<agentId>', 'Agent identifier')
-  .action((agentId: string) => {
+  .option('--json', 'Output as JSON')
+  .action((agentId: string, options: { json?: boolean }) => {
     const db = openDb();
     try {
       const report = getLatestRiskReport(db, agentId);
       if (!report) {
         console.log(pc.yellow(`  No risk report found for agent ${agentId}`));
         process.exit(0);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
       }
 
       console.log(pc.bold(`\n  Risk Report: ${pc.cyan(agentId)}\n`));
@@ -241,13 +251,19 @@ program
   .description('List alerts')
   .option('--agentId <id>', 'Filter by agent')
   .option('--active-only', 'Show only active alerts')
-  .action((options: { agentId?: string; activeOnly?: boolean }) => {
+  .option('--json', 'Output as JSON')
+  .action((options: { agentId?: string; activeOnly?: boolean; json?: boolean }) => {
     const db = openDb();
     try {
       const alerts = listAlerts(db, {
         agentId: options.agentId,
         activeOnly: options.activeOnly,
       });
+
+      if (options.json) {
+        console.log(JSON.stringify(alerts, null, 2));
+        return;
+      }
 
       if (alerts.length === 0) {
         console.log(pc.gray('  No alerts found'));
@@ -826,6 +842,115 @@ program
     if (result.invalidLeaves > 0) {
       process.exit(2);
     }
+  });
+
+// ── agents:list ─────────────────────────────────────────────────────────
+const AgentsListOptsSchema = z.object({
+  limit: z.coerce.number().int().positive().default(100),
+});
+
+program
+  .command('agents:list')
+  .description('List all agents with latest risk score')
+  .option('--limit <n>', 'Max agents to display')
+  .option('--json', 'Output as JSON')
+  .action((options: { limit?: string; json?: boolean }) => {
+    const parsed = AgentsListOptsSchema.safeParse({
+      limit: options.limit ?? process.env['WATCHTOWER_AGENTS_LIST_LIMIT'],
+    });
+    if (!parsed.success) {
+      console.error(pc.red(`  Invalid --limit: ${options.limit}`));
+      process.exit(1);
+    }
+
+    const db = openDb();
+    try {
+      const agents = listAgents(db).slice(0, parsed.data.limit);
+      const agentIds = agents.map((a) => a.agentId);
+      const reportMap = getLatestRiskReportsByAgents(db, agentIds);
+      const alertCountMap = getActiveAlertCountsByAgent(db, agentIds);
+
+      const enriched = agents.map((agent) => {
+        const report = reportMap.get(agent.agentId);
+        return {
+          agentId: agent.agentId,
+          status: agent.status,
+          overallRisk: report?.overallRisk ?? null,
+          confidence: report?.confidence ?? null,
+          activeAlertsCount: alertCountMap.get(agent.agentId) ?? 0,
+        };
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(enriched, null, 2));
+        return;
+      }
+
+      if (enriched.length === 0) {
+        console.log(pc.gray('  No agents found'));
+        return;
+      }
+
+      console.log(pc.bold(`\n  Agents (${enriched.length})\n`));
+      for (const a of enriched) {
+        const risk = a.overallRisk !== null ? riskColor(a.overallRisk) : pc.gray('N/A');
+        console.log(`  ${pc.cyan(a.agentId)}  ${risk}  ${pc.gray(a.status ?? 'ACTIVE')}  alerts:${a.activeAlertsCount}`);
+      }
+      console.log('');
+    } finally {
+      db.close();
+    }
+  });
+
+// ── transparency:tail ───────────────────────────────────────────────────
+const TransparencyTailOptsSchema = z.object({
+  n: z.coerce.number().int().positive().default(50),
+  logDir: z.string().min(1).default('./data/transparency'),
+});
+
+program
+  .command('transparency:tail')
+  .description('Show last N leaves from transparency log')
+  .option('--date <YYYY-MM-DD>', 'Date (default: today)')
+  .option('--n <count>', 'Number of leaves to show')
+  .option('--log-dir <dir>', 'Transparency log directory')
+  .option('--json', 'Output as JSON')
+  .action((options: { date?: string; n?: string; logDir?: string; json?: boolean }) => {
+    const parsed = TransparencyTailOptsSchema.safeParse({
+      n: options.n ?? process.env['WATCHTOWER_TRANSPARENCY_TAIL_N'],
+      logDir: options.logDir ?? process.env['WATCHTOWER_LOG_DIR'],
+    });
+    if (!parsed.success) {
+      console.error(pc.red(`  Invalid options: ${parsed.error.issues.map((i) => i.message).join(', ')}`));
+      process.exit(1);
+    }
+
+    const dateStr = options.date ?? new Date().toISOString().slice(0, 10);
+    const date = new Date(dateStr + 'T00:00:00Z');
+    if (isNaN(date.getTime())) {
+      console.error(pc.red(`  Invalid date: ${options.date}`));
+      process.exit(1);
+    }
+
+    const filePath = logFilePath(resolve(parsed.data.logDir), date);
+    const { leaves: tail, total } = readLogFileTail(filePath, parsed.data.n);
+
+    if (options.json) {
+      console.log(JSON.stringify(tail, null, 2));
+      return;
+    }
+
+    if (tail.length === 0) {
+      console.log(pc.gray(`  No leaves for ${dateStr}`));
+      return;
+    }
+
+    console.log(pc.bold(`\n  Transparency Log — ${dateStr} (last ${tail.length} of ${total})\n`));
+    for (const leaf of tail) {
+      const time = new Date(leaf.writtenAt * 1000).toISOString().slice(11, 19);
+      console.log(`  ${pc.gray(leaf.leafId.slice(0, 12))}  ${pc.cyan(leaf.agentId)}  ${riskColor(leaf.overallRisk)}  ${pc.gray(time)}`);
+    }
+    console.log('');
   });
 
 // ── helpers ──────────────────────────────────────────────────────────────

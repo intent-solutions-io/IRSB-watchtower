@@ -23,21 +23,35 @@ export interface LitPkpSignerConfig {
 }
 
 /**
- * Lit Protocol PKP Signer (STUB)
+ * Lit Protocol PKP Signer (DEPRECATED)
  *
- * This is a stub implementation. Full implementation would:
- * 1. Use @lit-protocol/lit-node-client
- * 2. Authenticate with Lit nodes using authSig
- * 3. Request PKP signatures through Lit Actions
+ * @deprecated This signer is deprecated. Use AgentPasskeySigner instead.
  *
- * Benefits of Lit PKP:
- * - Decentralized key management (no single point of failure)
- * - Programmable signing conditions (Lit Actions)
- * - Cross-chain compatibility
- * - No centralized custody
+ * The irsb-agent-passkey service now handles Lit Protocol PKP signing centrally.
+ * This provides a unified signing interface with:
+ * - Policy enforcement (allowlists, rate limits, spend caps)
+ * - Nonce management
+ * - Audit artifacts
+ * - Session capability management
  *
- * TODO: Implement full Lit Protocol integration
- * Reference: https://developer.litprotocol.com/
+ * Migration:
+ * ```typescript
+ * // Before (deprecated)
+ * const signer = createLitPkpSigner({ pkpPublicKey, authSig, ... });
+ *
+ * // After (recommended) - requires AGENT_PASSKEY_ENDPOINT env var
+ * import { createAgentPasskeySignerFromEnv } from './agentPasskeySigner.js';
+ * const signer = createAgentPasskeySignerFromEnv();
+ *
+ * // Or with explicit config:
+ * import { createAgentPasskeySigner } from './agentPasskeySigner.js';
+ * const signer = createAgentPasskeySigner({
+ *   endpoint: process.env.AGENT_PASSKEY_ENDPOINT!,
+ *   role: 'watchtower',
+ * });
+ * ```
+ *
+ * This stub remains for backwards compatibility but will throw on all operations.
  */
 export class LitPkpSigner implements Signer {
   private config: LitPkpSignerConfig;

@@ -64,3 +64,29 @@ export function listAlerts(
     isActive: row.is_active === 1,
   }));
 }
+
+/**
+ * Bulk-fetch active alert counts grouped by agent_id in a single query.
+ * Returns a Map keyed by agentId → count.
+ */
+export function getActiveAlertCountsByAgent(
+  db: Database.Database,
+  agentIds: string[],
+): Map<string, number> {
+  if (agentIds.length === 0) return new Map();
+
+  const rows = db
+    .prepare(
+      `SELECT agent_id, COUNT(*) as cnt
+       FROM alerts
+       WHERE is_active = 1 AND agent_id IN (${agentIds.map(() => '?').join(',')})
+       GROUP BY agent_id`,
+    )
+    .all(...agentIds) as Array<{ agent_id: string; cnt: number }>;
+
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    map.set(row.agent_id, row.cnt);
+  }
+  return map;
+}
