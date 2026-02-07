@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **AI Context**: For ecosystem-wide reference (contracts, deployments, concepts, glossary), see [../AI-CONTEXT.md](../AI-CONTEXT.md)
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
