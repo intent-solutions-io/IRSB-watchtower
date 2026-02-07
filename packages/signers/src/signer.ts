@@ -2,8 +2,13 @@ import type { Address, Hex, Account } from 'viem';
 
 /**
  * Signer type identifier
+ *
+ * - 'local': Local private key (dev/test only)
+ * - 'agent-passkey': Centralized agent-passkey service (RECOMMENDED)
+ * - 'gcp-kms': DEPRECATED - use agent-passkey
+ * - 'lit-pkp': DEPRECATED - use agent-passkey
  */
-export type SignerType = 'local' | 'gcp-kms' | 'lit-pkp';
+export type SignerType = 'local' | 'agent-passkey' | 'gcp-kms' | 'lit-pkp';
 
 /**
  * Transaction request for signing
@@ -81,9 +86,13 @@ export interface TypedData {
  *
  * All signer implementations must implement this interface.
  * This allows for pluggable signing mechanisms:
- * - LocalPrivateKeySigner: For development/testing
- * - GcpKmsSigner: For production with Cloud KMS
- * - LitPkpSigner: For decentralized key management
+ * - LocalPrivateKeySigner: For development/testing only
+ * - AgentPasskeySigner: RECOMMENDED for production (uses irsb-agent-passkey service)
+ * - GcpKmsSigner: DEPRECATED - use AgentPasskeySigner
+ * - LitPkpSigner: DEPRECATED - use AgentPasskeySigner
+ *
+ * The AgentPasskeySigner connects to the centralized irsb-agent-passkey service
+ * which handles Lit Protocol PKP signing, policy enforcement, and nonce management.
  */
 export interface Signer {
   /**

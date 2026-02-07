@@ -12,8 +12,13 @@ const privateKeySchema = z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid privat
 
 /**
  * Signer type enumeration
+ *
+ * - 'local': Local private key (dev/test only)
+ * - 'agent-passkey': Centralized agent-passkey service (RECOMMENDED for production)
+ * - 'gcp-kms': DEPRECATED - use agent-passkey instead
+ * - 'lit-pkp': DEPRECATED - use agent-passkey instead
  */
-export const signerTypeSchema = z.enum(['local', 'gcp-kms', 'lit-pkp']);
+export const signerTypeSchema = z.enum(['local', 'agent-passkey', 'gcp-kms', 'lit-pkp']);
 export type SignerType = z.infer<typeof signerTypeSchema>;
 
 /**
@@ -84,7 +89,29 @@ export const localSignerConfigSchema = z.object({
 export type LocalSignerConfig = z.infer<typeof localSignerConfigSchema>;
 
 /**
- * GCP KMS signer configuration (stub)
+ * Agent Passkey signer configuration (RECOMMENDED)
+ *
+ * Uses the centralized irsb-agent-passkey service for signing.
+ * The service handles Lit Protocol PKP, policy enforcement, and nonce management.
+ */
+export const agentPasskeySignerConfigSchema = z.object({
+  type: z.literal('agent-passkey'),
+  /** Agent Passkey service endpoint */
+  endpoint: z.string().url().default('https://irsb-agent-passkey-308207955734.us-central1.run.app'),
+  /** Authentication token for the service */
+  authToken: z.string().min(1).optional(),
+  /** Timeout in milliseconds (default: 30000) */
+  timeoutMs: z.coerce.number().int().min(1000).max(120000).default(30000),
+  /** Role identifier (watchtower, solver) */
+  role: z.enum(['watchtower', 'solver']).default('watchtower'),
+});
+export type AgentPasskeySignerConfig = z.infer<typeof agentPasskeySignerConfigSchema>;
+
+/**
+ * GCP KMS signer configuration (DEPRECATED)
+ *
+ * @deprecated Use agent-passkey instead. GCP KMS signing is now handled
+ * by the centralized agent-passkey service which uses Lit Protocol.
  */
 export const gcpKmsSignerConfigSchema = z.object({
   type: z.literal('gcp-kms'),
@@ -96,7 +123,10 @@ export const gcpKmsSignerConfigSchema = z.object({
 export type GcpKmsSignerConfig = z.infer<typeof gcpKmsSignerConfigSchema>;
 
 /**
- * Lit PKP signer configuration (stub)
+ * Lit PKP signer configuration (DEPRECATED)
+ *
+ * @deprecated Use agent-passkey instead. Lit Protocol PKP signing is now
+ * handled by the centralized agent-passkey service.
  */
 export const litPkpSignerConfigSchema = z.object({
   type: z.literal('lit-pkp'),
@@ -107,9 +137,14 @@ export type LitPkpSignerConfig = z.infer<typeof litPkpSignerConfigSchema>;
 
 /**
  * Union of all signer configurations
+ *
+ * Recommended: 'agent-passkey' for production
+ * Dev/Test: 'local' with test private key
+ * Deprecated: 'gcp-kms', 'lit-pkp' (use agent-passkey)
  */
 export const signerConfigSchema = z.discriminatedUnion('type', [
   localSignerConfigSchema,
+  agentPasskeySignerConfigSchema,
   gcpKmsSignerConfigSchema,
   litPkpSignerConfigSchema,
 ]);

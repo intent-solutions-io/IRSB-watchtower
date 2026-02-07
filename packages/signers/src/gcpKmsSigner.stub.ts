@@ -29,21 +29,31 @@ export interface GcpKmsSignerConfig {
 }
 
 /**
- * GCP Cloud KMS Signer (STUB)
+ * GCP Cloud KMS Signer (DEPRECATED)
  *
- * This is a stub implementation. Full implementation would:
- * 1. Use @google-cloud/kms to interact with Cloud KMS
- * 2. Sign digests using the asymmetric key
- * 3. Recover the Ethereum address from the public key
+ * @deprecated This signer is deprecated. Use AgentPasskeySigner instead.
  *
- * Benefits of KMS:
- * - Keys never leave Google's HSMs
- * - Audit logging of all signing operations
- * - IAM-based access control
- * - Automatic key rotation support
+ * The irsb-agent-passkey service now handles all signing centrally using
+ * Lit Protocol PKP (threshold signatures across TEE nodes). This provides:
+ * - Policy enforcement (allowlists, rate limits, spend caps)
+ * - Nonce management
+ * - Audit artifacts
+ * - Decentralized key custody
  *
- * TODO: Implement full GCP KMS integration
- * Reference: https://cloud.google.com/kms/docs/signing-digests
+ * Migration:
+ * ```typescript
+ * // Before (deprecated)
+ * const signer = createGcpKmsSigner({ projectId, keyring, key, ... });
+ *
+ * // After (recommended)
+ * import { createAgentPasskeySigner } from './agentPasskeySigner.js';
+ * const signer = createAgentPasskeySigner({
+ *   endpoint: 'https://irsb-agent-passkey-308207955734.us-central1.run.app',
+ *   role: 'watchtower',
+ * });
+ * ```
+ *
+ * This stub remains for backwards compatibility but will throw on all operations.
  */
 export class GcpKmsSigner implements Signer {
   private config: GcpKmsSignerConfig;
